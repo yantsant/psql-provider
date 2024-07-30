@@ -27,6 +27,10 @@ ROLE_ADMIN_DELEGATE = "0xc171260023d22a25a00a2789664c9334017843b831138c8ef03cc88
 ROLE_ADMIN = "0xf23ec0bb4210edd5cba85afd05127efcd2fc6a781bfed49188da1081670b22d8"
 ROLE_OPERTOR = "0x46a52cf33029de9f84853745a87af28464c80bf0346df1b32e205fc73319f622"
 ROLE_ADMIN_DEFAULT = "0x0000000000000000000000000000000000000000000000000000000000000000"
+ROLE_ADMIN_DELEGATE_ID = 0
+ROLE_ADMIN_ID = 1
+ROLE_OPERTOR_ID = 2
+ROLE_ADMIN_DEFAULT_ID = 3
 
 LOG_RETRIVE_TIMEOUT_SECONDS = 12 # one ETH block
 SLEEP_RETRY_TIMEOUT_SECONDS = 5
@@ -79,11 +83,33 @@ class ProviderData:
         retrives role hashes 
     """
     def __get_vault_roles(self):
-        self.ROLE_ADMIN_DELEGATE = self.vault.functions.ADMIN_DELEGATE_ROLE().call()
         self.ROLE_ADMIN = self.vault.functions.ADMIN_ROLE().call()
+        self.ROLE_ADMIN_DELEGATE = self.vault.functions.ADMIN_DELEGATE_ROLE().call()
         self.ROLE_OPERTOR = self.vault.functions.OPERATOR().call()
         self.ROLE_ADMIN_DEFAULT = self.vault.functions.DEFAULT_ADMIN_ROLE().call()
         print(f"ROLE_ADMIN_DELEGATE: {ROLE_ADMIN_DELEGATE}\nROLE_ADMIN: {ROLE_ADMIN}\nROLE_OPERTOR: {ROLE_OPERTOR}\nROLE_ADMIN_DEFAULT: {ROLE_ADMIN_DEFAULT}")
+        return
+        self.psql.drop_table_data("rights")
+        self.__write_right_hash_to_db(ROLE_ADMIN_ID, self.ROLE_ADMIN)
+        self.__write_right_hash_to_db(ROLE_ADMIN_DELEGATE_ID, self.ROLE_ADMIN_DELEGATE)
+        self.__write_right_hash_to_db(ROLE_OPERTOR_ID, self.ROLE_OPERTOR)
+        self.__write_right_hash_to_db(ROLE_ADMIN_DEFAULT_ID, self.ROLE_ADMIN_DEFAULT)
+
+    def __write_right_hash_to_db(self, id, hash):
+        self.psql.write_data(
+            """
+            INSERT INTO public."rights" (id, hash)
+            VALUES (%s, %s);
+            """, [id, hash])
+    
+    def __write_addresses_right(self, block, timestamp, right_id, addresses):
+        for address in addresses:
+            self.psql.write_data(
+                """
+                INSERT INTO public."rights_history" (block, timestamp, rightid, address)
+                VALUES (%s, %s, %s, %s);
+                """, [block, timestamp, right_id, address])
+
 
     def run(self):
         self.__retrive_roles_data(BLOCK_DEPLOY-1)
@@ -169,6 +195,11 @@ class ProviderData:
                             admins_default = self.__get_address_by_role_at_block(ROLE_ADMIN_DEFAULT, log.blockNumber)
                             operators = self.__get_address_by_role_at_block(ROLE_OPERTOR, log.blockNumber)
                             print(log.blockNumber, f"admins {admins}, admins_delegate {admins_delegate} operators {operators}, admins_default {admins_default}")
+                            timestamp = self.__get_block_timestamp(log.blockNumber)
+                            self.__write_addresses_right(log.blockNumber, timestamp, ROLE_ADMIN_ID, admins)
+                            self.__write_addresses_right(log.blockNumber, timestamp, ROLE_ADMIN_DELEGATE_ID, admins_delegate)
+                            self.__write_addresses_right(log.blockNumber, timestamp, ROLE_OPERTOR_ID, operators)
+                            #self.__write_addresses_right(log.blockNumber, ROLE_ADMIN_ID, admins)
                             last_block = log.blockNumber
 
                     except Exception as e:
@@ -306,6 +337,22 @@ class ProviderData:
         with open("./abi/oracle.json") as f:
             oracle_abi = json.load(f)
         self.oracle = self.http.eth.contract(address=self.oracle_address, abi=oracle_abi)
+
+        self.configurator_address = self.vault.functions.configurator().call()
+
+        with open("./abi/configurator.json") as f:
+            configurator_abi = json.load(f)
+        self.configurator = self.http.eth.contract(address=self.configurator_address, abi=configurator_abi)
+
+        self.validator_address = self.configurator.functions.validator().call()
+
+        print(f"""
+        =========================== addresses ===========================
+                 vault: {self.vault_address}
+          configurator: {self.configurator_address}
+             validator: {self.validator_address}
+                oracle: {self.oracle_address}
+        ================================================================""")
     
     """
         gets HTTP connection with retry

@@ -39,6 +39,17 @@ class PostgreSQL:
         
         return True
     
+    def drop_table_data(self, table):
+        query = f"""TRUNCATE {table};
+                    DELETE FROM {table};"""
+        try:
+            self.cursor.execute(query)
+            self.connection.commit()
+        except Exception as e:
+            self.connection.rollback()
+            print(f"SQL query {query} was failed: {e}")
+            return None
+
     def write_data(self, query, data):
         try:
             self.cursor.execute(query, data)
